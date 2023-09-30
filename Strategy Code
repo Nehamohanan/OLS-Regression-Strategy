@@ -1,0 +1,51 @@
+import pandas as pd
+import numpy as np
+import quantstats as qs
+
+class FinancialData:
+    url = 'https://certificate.tpq.io/findata.csv'
+    
+    def __init__(self,symbol):
+        self.symbol = symbol
+        self.retrieve_data()
+        self.prepare_data()
+        
+    def retrieve_data(self):
+        self.raw = pd.read_csv(self.url, index_col=0, parse_dates=True)
+        
+    def prepare_data(self):
+        self.data = pd.DataFrame(self.raw[self.symbol])
+        self.data['r'] = np.log(self.data/self.data.shift(1))
+        
+    def plot_data(self, cols=None):
+        if cols is None:
+            cols = [self.symbol]
+        self.data[cols].plot(title=self.symbol)  
+
+class OLSBacktester(FinancialData):
+    def prepare_lags(self):
+        self.cols = list()
+        for lag in range(1, self.lags + 1):
+            col = f'lag_{lag}'
+            self.data[col] = self.data['r'].shift(lag)
+            self.cols.append(col)
+        self.data.dropna(inplace=True)   
+        
+    def backtest_strategy(self, lags=5):
+        self.lags = lags
+        self.prepare_lags()
+        reg = np.linalg.lstsq(self.data[self.cols], self.data['r'], rcond=-1)[0]
+        self.data['e'] = np.dot(self.data[self.cols], reg)
+        self.data['p'] = np.sign(self.data['e'])
+        self.data['s'] = self.data['p'] * self.data['r']
+        strategy_returns = self.data[['r', 's']].sum().apply(np.exp)
+        
+        # Generate a full tear sheet
+        qs.reports.full(self.data['s'], benchmark=self.data['r'])
+        
+        return strategy_returns
+
+# Example usage
+ols = OLSBacktester('EUR=')
+strategy_returns = ols.backtest_strategy(lags=7)
+print(strategy_returns)
